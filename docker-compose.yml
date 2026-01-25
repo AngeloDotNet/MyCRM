@@ -1,0 +1,62 @@
+version: "3.8"
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - SA_PASSWORD=Your_strong_Admin!23
+      - ACCEPT_EULA=Y
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "Your_strong_Admin!23", "-Q", "select 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2023-01-10T00-00-00Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  api:
+    build:
+      context: ./Api
+      dockerfile: Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=mssql,1433;Database=MyCrmDb;User Id=sa;Password=Your_strong_Admin!23;
+      - Jwt__Issuer=MyCrmApi
+      - Jwt__Audience=MyCrmClients
+      - Jwt__Key=ThisIsA_ChangeMe_ReplaceWithStrongKey12345!
+      - S3__ServiceURL=http://minio:9000
+      - S3__AccessKey=minioadmin
+      - S3__SecretKey=minioadmin
+      - S3__Bucket=mycrm-attachments
+    ports:
+      - "5000:80"
+    depends_on:
+      mssql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./Api/wwwroot/uploads:/app/wwwroot/uploads
+
+volumes:
+  mssqldata:
+  miniodata:
