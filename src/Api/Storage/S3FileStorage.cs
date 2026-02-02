@@ -11,9 +11,9 @@ public class S3FileStorage : IFileStorage
     public S3FileStorage(IAmazonS3 s3, IConfiguration config)
     {
         this.s3 = s3;
+
         bucket = config["S3:Bucket"] ?? "mycrm-attachments";
-        // ensure bucket exists
-        this.s3.EnsureBucketExistsAsync(bucket).GetAwaiter().GetResult();
+        this.s3.EnsureBucketExistsAsync(bucket).GetAwaiter().GetResult(); // ensure bucket exists
     }
 
     public async Task<string> UploadAsync(IFormFile file, string relativePath)
