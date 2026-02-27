@@ -2,9 +2,12 @@ using System.Text;
 using Amazon;
 using Amazon.S3;
 using Api.Data;
+using Api.Mapping;
 using Api.Models;
 using Api.Services;
 using Api.Storage;
+using Api.Validators;
+using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -75,8 +78,8 @@ public class Program
         {
             options.UseSqlServer(conn, sqlOptions =>
             {
-                sqlOptions.UseCompatibilityLevel(170); // SQL Server 2025 (17.x)
-                //sqlOptions.UseCompatibilityLevel(160); // SQL Server 2022 (16.x)
+                //sqlOptions.UseCompatibilityLevel(170); // SQL Server 2025 (17.x)
+                sqlOptions.UseCompatibilityLevel(160); // SQL Server 2022 (16.x)
                 //sqlOptions.UseCompatibilityLevel(150); // SQL Server 2019 (15.x)
                 //...It's possible to set other SQL Server compatibility levels if needed
 
@@ -144,6 +147,12 @@ public class Program
         // Token service
         builder.Services.AddScoped<ITokenService, TokenService>();
 
+        // AutoMapper
+        builder.Services.AddAutoMapper(typeof(MappingProfile));
+
+        // FluentValidation
+        builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
+
         var app = builder.Build();
         await SeedData.EnsureSeedDataAsync(app.Services, configuration);
 
@@ -153,6 +162,7 @@ public class Program
             app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", $"{app.Environment.ApplicationName} V1"));
         }
 
+        app.UseStaticFiles();
         app.UseRouting();
 
         app.UseAuthentication();
