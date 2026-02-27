@@ -1,10 +1,12 @@
-﻿namespace Api.Entities;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Api.Entities;
 
 public class Contact
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string FirstName { get; set; } = null!;
-    public string LastName { get; set; } = null!;
+    [Required] public string FirstName { get; set; }
+    [Required] public string LastName { get; set; }
     public string? Email { get; set; }
     public string? Phone { get; set; }
     public Guid? CompanyId { get; set; }

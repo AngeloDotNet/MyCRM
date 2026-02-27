@@ -9,4 +9,5 @@ public class RefreshToken
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool Revoked { get; set; } = false;
     public string? ReplacedByHash { get; set; }
+    public DateTime? RevokedAt { get; set; }
 }
