@@ -10,4 +10,8 @@ public class RefreshToken
     public bool Revoked { get; set; } = false;
     public string? ReplacedByHash { get; set; }
     public DateTime? RevokedAt { get; set; }
+
+    // Audit fields
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
 }
