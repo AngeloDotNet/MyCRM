@@ -1,5 +1,7 @@
 ﻿using Api.Data;
+using Api.DTOs;
 using Api.Entities;
+using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,14 +11,15 @@ namespace Api.Controllers;
 [Authorize]
 [ApiController]
 [Route("api/v1/contacts")]
-public class ContactsController(ApplicationDbContext db) : ControllerBase
+public class ContactsController(ApplicationDbContext db, IMapper mapper) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
         var items = await db.Contacts.AsNoTracking().ToListAsync();
+        var dto = mapper.Map<IEnumerable<ContactDto>>(items);
 
-        return Ok(items);
+        return Ok(dto);
     }
 
     [HttpGet("{id:guid}")]
@@ -29,20 +32,23 @@ public class ContactsController(ApplicationDbContext db) : ControllerBase
             return NotFound();
         }
 
-        return Ok(item);
+        return Ok(mapper.Map<ContactDto>(item));
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Contact model)
+    public async Task<IActionResult> Create([FromBody] ContactDto model)
     {
-        model.Id = Guid.NewGuid();
-        model.CreatedAt = DateTime.UtcNow;
-        model.UpdatedAt = DateTime.UtcNow;
+        var entity = mapper.Map<Contact>(model);
 
-        db.Contacts.Add(model);
+        entity.Id = Guid.NewGuid();
+        entity.CreatedAt = DateTime.UtcNow;
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        db.Contacts.Add(entity);
         await db.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(Get), new { id = model.Id }, model);
+        var dto = mapper.Map<ContactDto>(entity);
+        return CreatedAtAction(nameof(Get), new { id = entity.Id }, dto);
     }
 
     [HttpPut("{id:guid}")]
@@ -55,11 +61,7 @@ public class ContactsController(ApplicationDbContext db) : ControllerBase
             return NotFound();
         }
 
-        dbItem.FirstName = model.FirstName;
-        dbItem.LastName = model.LastName;
-        dbItem.Email = model.Email;
-        dbItem.Phone = model.Phone;
-        dbItem.CompanyId = model.CompanyId;
+        mapper.Map(model, dbItem);
         dbItem.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();

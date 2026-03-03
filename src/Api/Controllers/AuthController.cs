@@ -1,6 +1,7 @@
 ﻿using Api.DTOs;
 using Api.Models;
 using Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
@@ -61,6 +62,21 @@ public class AuthController(UserManager<ApplicationUser> userManager, ITokenServ
         }
 
         return Ok(new { access_token = rotated.Value.accessToken, refresh_token = rotated.Value.refreshToken });
+    }
+
+    [Authorize]
+    [HttpPost("revoke/all")]
+    public async Task<IActionResult> RevokeAll()
+    {
+        // revoke all refresh tokens for current user
+        var userId = User.Claims.FirstOrDefault(c => c.Type == System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Forbid();
+        }
+
+        await tokenService.RevokeAllRefreshTokensAsync(userId);
+        return Ok();
     }
 
     [HttpPost("revoke")]
