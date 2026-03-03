@@ -5,25 +5,13 @@ using System.Text;
 using Api.Data;
 using Api.Entities;
 using Api.Models;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Api.Services;
 
-public class TokenService : ITokenService
+public class TokenService(IConfiguration config, ApplicationDbContext db, IHttpContextAccessor httpContextAccessor) : ITokenService
 {
-    private readonly IConfiguration _config;
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly ApplicationDbContext _db;
-
-    public TokenService(IConfiguration config, UserManager<ApplicationUser> userManager, ApplicationDbContext db)
-    {
-        _config = config;
-        _userManager = userManager;
-        _db = db;
-    }
-
     public async Task<(string accessToken, string refreshToken)> GenerateTokensAsync(ApplicationUser user, IEnumerable<string> roles)
     {
         var accessToken = CreateAccessToken(user, roles);
@@ -34,45 +22,59 @@ public class TokenService : ITokenService
         return (accessToken, refreshToken);
     }
 
-    // Atomically rotate: validate provided refresh token, revoke it and create a new one
+    // Rotate. Detect reuse: if presented token is already revoked => revoke all tokens for user (security incident)
     public async Task<(string accessToken, string refreshToken)?> RotateRefreshTokenAsync(string providedRefreshToken, ApplicationUser user, IEnumerable<string> roles)
     {
         var hash = Hash(providedRefreshToken);
 
-        var existing = await _db.RefreshTokens
+        var existing = await db.RefreshTokens
             .Where(x => x.UserId == user.Id && x.TokenHash == hash)
             .OrderByDescending(x => x.CreatedAt)
             .FirstOrDefaultAsync();
 
-        if (existing == null || existing.Revoked || existing.ExpiresAt < DateTime.UtcNow)
+        if (existing == null)
         {
-            // possible reuse or invalid token
-            // optional: revoke all tokens for user on detection
+            // token not found
             return null;
         }
 
-        // Generate new tokens
+        if (existing.Revoked)
+        {
+            // refresh token reuse detected -> revoke all tokens for user
+            await RevokeAllRefreshTokensAsync(user.Id);
+            return null;
+        }
+
+        if (existing.ExpiresAt < DateTime.UtcNow)
+        {
+            // expired
+            return null;
+        }
+
+        // produce new tokens
         var newAccessToken = CreateAccessToken(user, roles);
         var newRefreshToken = CreateRefreshToken();
         var newHash = Hash(newRefreshToken);
 
-        // Mark existing as revoked and point to replacement
+        // mark existing as revoked, set replaced by
         existing.Revoked = true;
+        existing.RevokedAt = DateTime.UtcNow;
         existing.ReplacedByHash = newHash;
-        existing.ExpiresAt = existing.ExpiresAt; // keep for audit
 
-        // Create new refresh token entity
+        // create new refresh token record (store IP/UA for audit)
         var rt = new RefreshToken
         {
             TokenHash = newHash,
             UserId = user.Id,
-            ExpiresAt = DateTime.UtcNow.AddDays(int.Parse(_config["Jwt:RefreshTokenDays"] ?? "30")),
+            ExpiresAt = DateTime.UtcNow.AddDays(int.Parse(config["Jwt:RefreshTokenDays"] ?? "30")),
             CreatedAt = DateTime.UtcNow,
-            Revoked = false
+            Revoked = false,
+            IpAddress = GetCurrentIp(),
+            UserAgent = GetCurrentUserAgent()
         };
 
-        _db.RefreshTokens.Add(rt);
-        await _db.SaveChangesAsync();
+        db.RefreshTokens.Add(rt);
+        await db.SaveChangesAsync();
 
         return (newAccessToken, newRefreshToken);
     }
@@ -80,10 +82,9 @@ public class TokenService : ITokenService
     public async Task<bool> ValidateRefreshTokenAsync(string refreshToken, ApplicationUser user)
     {
         var hash = Hash(refreshToken);
-        var rt = await _db.RefreshTokens
-            .Where(x => x.UserId == user.Id && !x.Revoked)
-            .OrderByDescending(x => x.CreatedAt)
-            .FirstOrDefaultAsync();
+        var rt = await db.RefreshTokens.Where(x => x.UserId == user.Id && !x.Revoked)
+            .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync();
+
         if (rt == null)
         {
             return false;
@@ -105,22 +106,38 @@ public class TokenService : ITokenService
     public async Task RevokeRefreshTokenAsync(string refreshToken, ApplicationUser user)
     {
         var hash = Hash(refreshToken);
-        var rt = await _db.RefreshTokens.FirstOrDefaultAsync(x => x.UserId == user.Id && x.TokenHash == hash && !x.Revoked);
+        var rt = await db.RefreshTokens.FirstOrDefaultAsync(x => x.UserId == user.Id && x.TokenHash == hash && !x.Revoked);
+
         if (rt == null)
         {
             return;
         }
 
         rt.Revoked = true;
-        await _db.SaveChangesAsync();
+        rt.RevokedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+    }
+
+    public async Task RevokeAllRefreshTokensAsync(string userId)
+    {
+        var tokens = await db.RefreshTokens.Where(x => x.UserId == userId && !x.Revoked).ToListAsync();
+
+        foreach (var t in tokens)
+        {
+            t.Revoked = true;
+            t.RevokedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
     }
 
     private string CreateAccessToken(ApplicationUser user, IEnumerable<string> roles)
     {
-        var jwtSection = _config.GetSection("Jwt");
+        var jwtSection = config.GetSection("Jwt");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Key"]));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var claims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id),
@@ -136,23 +153,28 @@ public class TokenService : ITokenService
             expires: DateTime.UtcNow.AddMinutes(int.Parse(jwtSection["AccessTokenMinutes"] ?? "15")),
             signingCredentials: creds
         );
+
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
     private async Task StoreRefreshTokenAsync(string refreshToken, string userId)
     {
-        var jwtSection = _config.GetSection("Jwt");
+        var jwtSection = config.GetSection("Jwt");
         var hash = Hash(refreshToken);
+
         var rt = new RefreshToken
         {
             TokenHash = hash,
             UserId = userId,
             ExpiresAt = DateTime.UtcNow.AddDays(int.Parse(jwtSection["RefreshTokenDays"] ?? "30")),
             CreatedAt = DateTime.UtcNow,
-            Revoked = false
+            Revoked = false,
+            IpAddress = GetCurrentIp(),
+            UserAgent = GetCurrentUserAgent()
         };
-        _db.RefreshTokens.Add(rt);
-        await _db.SaveChangesAsync();
+
+        db.RefreshTokens.Add(rt);
+        await db.SaveChangesAsync();
     }
 
     private static string CreateRefreshToken()
@@ -162,8 +184,45 @@ public class TokenService : ITokenService
 
     private static string Hash(string input)
     {
-        using var sha = System.Security.Cryptography.SHA256.Create();
-        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(input));
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+
         return Convert.ToBase64String(bytes);
+    }
+
+    private string? GetCurrentIp()
+    {
+        try
+        {
+            var ctx = httpContextAccessor.HttpContext;
+            if (ctx == null)
+            {
+                return null;
+            }
+
+            // X-Forwarded-For or remote IP
+            if (ctx.Request.Headers.TryGetValue("X-Forwarded-For", out var ff))
+            {
+                return ff.ToString().Split(',')[0].Trim();
+            }
+
+            return ctx.Connection.RemoteIpAddress?.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string? GetCurrentUserAgent()
+    {
+        try
+        {
+            var ctx = httpContextAccessor.HttpContext;
+            return ctx?.Request?.Headers.UserAgent.ToString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
