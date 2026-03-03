@@ -28,6 +28,7 @@ public class Program
         var conn = configuration.GetConnectionString("DefaultConnection") ?? configuration["ConnectionStrings:DefaultConnection"];
 
         builder.Services.AddControllers();
+        builder.Services.AddHttpContextAccessor();
 
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen(options =>
