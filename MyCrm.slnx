@@ -3,9 +3,9 @@
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
     <File Path="Architettura.md" />
+    <File Path="COMANDI_SHELL.md" />
     <File Path="docker-compose.yml" />
     <File Path="LICENSE" />
-    <File Path="NOTE.md" />
     <File Path="README.md" />
   </Folder>
   <Project Path="src/Api/Api.csproj" />
