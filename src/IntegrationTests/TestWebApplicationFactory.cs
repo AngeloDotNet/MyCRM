@@ -8,7 +8,6 @@ using Microsoft.VisualStudio.TestPlatform.TestHost;
 
 namespace IntegrationTests;
 
-// Generic factory which replaces the SQL Server DB with an InMemory DB for tests
 public class TestWebApplicationFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)

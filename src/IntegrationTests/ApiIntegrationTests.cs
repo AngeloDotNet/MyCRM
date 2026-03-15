@@ -11,7 +11,7 @@ public class ApiIntegrationTests(TestWebApplicationFactory factory) : IClassFixt
     {
         var client = factory.CreateClient();
 
-        var email = $"inttest{Guid.NewGuid().ToString()[..6]}@local";
+        var email = $"inttest{System.Guid.NewGuid().ToString().Substring(0, 6)}@local";
         var password = "Password123!";
 
         // Register
