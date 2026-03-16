@@ -1,0 +1,63 @@
+﻿@page "/contacts"
+@inject ApiClient Api
+@using Models
+@using WebClient.Services
+
+<h3>Contacts</h3>
+
+@if (IsLoading)
+{
+    <p>Loading...</p>
+}
+else if (Error is not null)
+{
+    <p class="error">@Error</p>
+}
+else
+{
+    <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
+        <tbody>
+            @foreach (var c in BuyerContacts)
+            {
+                <tr>
+                    <td>@($"{c.FirstName} {c.LastName}")</td>
+                    <td>@c.Email</td>
+                    <td>@c.Phone</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<ContactDto> BuyerContacts = Array.Empty<ContactDto>();
+    private bool IsLoading = true;
+    private string? Error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        IsLoading = true;
+        try
+        {
+            var res = await Api.GetAsync<List<ContactDto>>("/api/v1/contacts");
+
+            if (res.IsSuccess)
+            {
+                BuyerContacts = res.Value!;
+            }
+            else
+            {
+                Error = $"Error: {res.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Error = ex.Message;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+}

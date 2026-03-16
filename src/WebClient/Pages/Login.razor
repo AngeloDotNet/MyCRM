@@ -1,0 +1,55 @@
+﻿@page "/login"
+@inject ApiClient Api
+@inject ITokenProvider TokenProvider
+@inject NavigationManager Nav
+
+@using Models
+@using WebClient.Services
+
+<h3>Login</h3>
+
+@if (!string.IsNullOrEmpty(Error))
+{
+    <div class="error">@Error</div>
+}
+
+<div>
+    <label>Email</label>
+    <input @bind="Email" />
+</div>
+<div>
+    <label>Password</label>
+    <input type="password" @bind="Password" />
+</div>
+<button @onclick="DoLogin">Login</button>
+
+@code {
+    private string Email = string.Empty;
+    private string Password = string.Empty;
+    private string? Error;
+
+    private async Task DoLogin()
+    {
+        Error = null;
+        try
+        {
+            var res = await Api.PostAsync<LoginResponse>("/api/v1/auth/login", new { Email, Password }, includeAuth: false);
+            if (res.IsSuccess)
+            {
+                var login = res.Value!;
+                await TokenProvider.SetTokensAsync(login.AccessToken, login.RefreshToken, Email);
+                // Notify auth state provider
+                await TokenProvider.NotifyTokensChangedAsync();
+                Nav.NavigateTo("/contacts");
+            }
+            else
+            {
+                Error = $"Login failed: {res.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Error = ex.Message;
+        }
+    }
+}
