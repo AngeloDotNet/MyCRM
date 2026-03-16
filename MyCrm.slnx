@@ -10,4 +10,5 @@
   </Folder>
   <Project Path="src/Api/Api.csproj" />
   <Project Path="src/IntegrationTests/IntegrationTests.csproj" Id="d5366314-12ad-4257-99b4-f5837ebbba59" />
+  <Project Path="src/WebClient/WebClient.csproj" Id="f7bf952a-c024-4139-94e4-a03181404c8c" />
 </Solution>
