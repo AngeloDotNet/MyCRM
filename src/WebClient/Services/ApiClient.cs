@@ -1,115 +1,135 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using MudBlazor;
+using WebClient.Services;
 
-namespace WebClient.Services;
-
-public class ApiClient(HttpClient http, ITokenProvider tokens, ILogger<ApiClient> logger)
+namespace MyCrm.Client.Services
 {
-    public async Task<ApiResult<T>> GetAsync<T>(string url) => await SendAsync<T>(() => new HttpRequestMessage(HttpMethod.Get, url), includeAuth: true);
-
-    public async Task<ApiResult<T>> PostAsync<T>(string url, object payload, bool includeAuth = true)
+    public class ApiClient(HttpClient http, ITokenProvider tokens, ILogger<ApiClient> logger, ISnackbar snackbar)
     {
-        return await SendAsync<T>(() =>
-        {
-            var req = new HttpRequestMessage(HttpMethod.Post, url);
-            req.Content = JsonContent.Create(payload);
-            return req;
-        }, includeAuth);
-    }
+        public async Task<ApiResult<T>> GetAsync<T>(string url) => await SendAsync<T>(() => new HttpRequestMessage(HttpMethod.Get, url), includeAuth: true);
 
-    private async Task<ApiResult<T>> SendAsync<T>(Func<HttpRequestMessage> requestFactory, bool includeAuth = true)
-    {
-        (var access, var refresh, var email) = await tokens.GetTokensAsync();
-
-        HttpResponseMessage? response = null;
-        // attempt request (with token if present)
-        async Task<HttpRequestMessage> PrepareRequestAsync()
+        public async Task<ApiResult<T>> PostAsync<T>(string url, object payload, bool includeAuth = true)
         {
-            var req = requestFactory();
-            if (includeAuth && !string.IsNullOrEmpty(access))
+            return await SendAsync<T>(() =>
             {
-                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", access);
-            }
-
-            return req;
+                var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Content = JsonContent.Create(payload);
+                return req;
+            }, includeAuth);
         }
 
-        var reqMsg = await PrepareRequestAsync();
-        response = await http.SendAsync(reqMsg);
-
-        if (response.StatusCode == HttpStatusCode.Unauthorized && includeAuth && !string.IsNullOrEmpty(refresh) && !string.IsNullOrEmpty(email))
+        private async Task<ApiResult<T>> SendAsync<T>(Func<HttpRequestMessage> requestFactory, bool includeAuth = true)
         {
-            // try refresh
-            var refreshed = await TryRefreshAsync(email, refresh);
-            if (refreshed)
-            {
-                // retry once
-                (var newAccess, var _, var _) = await tokens.GetTokensAsync();
-                var retryReq = requestFactory();
+            var (access, refresh, email) = await tokens.GetTokensAsync();
 
-                if (!string.IsNullOrEmpty(newAccess))
+            HttpResponseMessage? response = null;
+
+            async Task<HttpRequestMessage> PrepareRequestAsync(string? token)
+            {
+                var req = requestFactory();
+                if (includeAuth && !string.IsNullOrEmpty(token))
                 {
-                    retryReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", newAccess);
+                    req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
                 }
 
-                response = await http.SendAsync(retryReq);
+                return req;
             }
-        }
 
-        if (response == null)
-        {
-            return ApiResult<T>.Fail("No response");
-        }
+            var reqMsg = await PrepareRequestAsync(access);
+            response = await http.SendAsync(reqMsg);
 
-        if (response.IsSuccessStatusCode)
-        {
-            if (typeof(T) == typeof(object) || response.Content.Headers.ContentLength == 0)
+            if (response.StatusCode == HttpStatusCode.Unauthorized && includeAuth)
             {
-                return ApiResult<T>.Success(default!);
+                // Try refresh if we have refresh token and email
+                if (!string.IsNullOrEmpty(refresh) && !string.IsNullOrEmpty(email))
+                {
+                    var refreshed = await TryRefreshAsync(email, refresh);
+                    if (refreshed)
+                    {
+                        // retry once with new access token
+                        var (newAccess, _, _) = await tokens.GetTokensAsync();
+                        var retryReq = await PrepareRequestAsync(newAccess);
+                        response = await http.SendAsync(retryReq);
+                    }
+                    else
+                    {
+                        // Refresh failed -> force logout/clear tokens and notify user
+                        await tokens.ClearTokensAsync();
+                        snackbar.Add("Sessione scaduta. Effettua il login.", Severity.Warning);
+                        return ApiResult<T>.Fail("Unauthorized", HttpStatusCode.Unauthorized);
+                    }
+                }
+                else
+                {
+                    // No refresh token -> clear and notify
+                    await tokens.ClearTokensAsync();
+                    snackbar.Add("Sessione non valida. Effettua il login.", Severity.Warning);
+                    return ApiResult<T>.Fail("Unauthorized", HttpStatusCode.Unauthorized);
+                }
             }
 
-            var value = await response.Content.ReadFromJsonAsync<T>();
-            return ApiResult<T>.Success(value!);
+            if (response == null)
+                return ApiResult<T>.Fail("No response");
+
+            if (response.IsSuccessStatusCode)
+            {
+                if (typeof(T) == typeof(object) || response.Content.Headers.ContentLength == 0)
+                {
+                    return ApiResult<T>.Success(default!);
+                }
+
+                var value = await response.Content.ReadFromJsonAsync<T>();
+                return ApiResult<T>.Success(value!);
+            }
+
+            // If after retry still unauthorized -> clear tokens
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                await tokens.ClearTokensAsync();
+                snackbar.Add("Accesso negato. Effettua il login.", Severity.Error);
+            }
+
+            return ApiResult<T>.Fail(response.StatusCode.ToString(), response.StatusCode);
         }
 
-        return ApiResult<T>.Fail(response.StatusCode.ToString(), response.StatusCode);
+        private async Task<bool> TryRefreshAsync(string email, string refreshToken)
+        {
+            try
+            {
+                var r = await http.PostAsJsonAsync("/api/v1/auth/refresh", new { Email = email, RefreshToken = refreshToken });
+
+                if (!r.IsSuccessStatusCode)
+                {
+                    // If 401 and reuse detection occurred on server, server revoked sessions; ensure local logout
+                    logger.LogWarning("Refresh failed with status {Status}", r.StatusCode);
+                    return false;
+                }
+
+                var json = await r.Content.ReadFromJsonAsync<JsonElement>();
+
+                if (json.TryGetProperty("access_token", out var at) && json.TryGetProperty("refresh_token", out var rt))
+                {
+                    var access = at.GetString()!;
+                    var refresh = rt.GetString()!;
+                    await tokens.SetTokensAsync(access, refresh, email);
+                    await tokens.NotifyTokensChangedAsync();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Refresh failed");
+            }
+
+            return false;
+        }
     }
 
-    private async Task<bool> TryRefreshAsync(string email, string refreshToken)
+    public record ApiResult<T>(bool IsSuccess, T? Value, string? Error, System.Net.HttpStatusCode? StatusCode)
     {
-        try
-        {
-            var r = await http.PostAsJsonAsync("/api/v1/auth/refresh", new { Email = email, RefreshToken = refreshToken });
-
-            if (!r.IsSuccessStatusCode)
-            {
-                return false;
-            }
-
-            var json = await r.Content.ReadFromJsonAsync<JsonElement>();
-
-            if (json.TryGetProperty("access_token", out var at) && json.TryGetProperty("refresh_token", out var rt))
-            {
-                var access = at.GetString()!;
-                var refresh = rt.GetString()!;
-                await tokens.SetTokensAsync(access, refresh, email);
-                await tokens.NotifyTokensChangedAsync();
-
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Refresh failed");
-        }
-
-        return false;
+        public static ApiResult<T> Success(T value) => new(true, value, null, null);
+        public static ApiResult<T> Fail(string? err, System.Net.HttpStatusCode? status = null) => new(false, default, err, status);
     }
-}
-
-public record ApiResult<T>(bool IsSuccess, T? Value, string? Error, System.Net.HttpStatusCode? StatusCode)
-{
-    public static ApiResult<T> Success(T value) => new(true, value, null, null);
-    public static ApiResult<T> Fail(string? err, System.Net.HttpStatusCode? status = null) => new(false, default, err, status);
 }
