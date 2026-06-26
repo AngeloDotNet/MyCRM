@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run unit tests
+        run: |
+          if [ -d "tests/Api.UnitTests" ]; then
+            dotnet test tests/Api.UnitTests/Api.UnitTests.csproj --no-build --verbosity normal
+          else
+            echo "No unit tests project found; skipping unit tests"
+          fi
+
+      - name: Run integration tests
+        run: |
+          if [ -d "tests/Api.IntegrationTests" ]; then
+            dotnet test tests/Api.IntegrationTests/Api.IntegrationTests.csproj --no-build --verbosity normal
+          else
+            echo "No integration tests project found; skipping integration tests"
+          fi
