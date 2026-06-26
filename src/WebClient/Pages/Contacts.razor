@@ -1,37 +1,37 @@
-﻿@page "/contacts"
+@page "/contacts"
+@inject ISnackbar Snackbar
 @inject ApiClient Api
-@using Models
-@using WebClient.Services
 
-<h3>Contacts</h3>
+<MudPaper Class="pa-4" Elevation="2">
+    <MudText Typo="Typo.h5">Contacts</MudText>
 
-@if (IsLoading)
-{
-    <p>Loading...</p>
-}
-else if (Error is not null)
-{
-    <p class="error">@Error</p>
-}
-else
-{
-    <table>
-        <thead><tr><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
-        <tbody>
-            @foreach (var c in BuyerContacts)
-            {
-                <tr>
-                    <td>@($"{c.FirstName} {c.LastName}")</td>
-                    <td>@c.Email</td>
-                    <td>@c.Phone</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
+    @if (IsLoading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (Error is not null)
+    {
+        <MudAlert Severity="Severity.Error">@Error</MudAlert>
+    }
+    else
+    {
+        <MudTable Items="BuyerContacts">
+            <HeaderContent>
+                <MudTh>Nome</MudTh>
+                <MudTh>Email</MudTh>
+                <MudTh>Phone</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@($"{context.FirstName} {context.LastName}")</MudTd>
+                <MudTd>@context.Email</MudTd>
+                <MudTd>@context.Phone</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
 
 @code {
-    private IReadOnlyList<ContactDto> BuyerContacts = Array.Empty<ContactDto>();
+    private List<ContactDto> BuyerContacts = new();
     private bool IsLoading = true;
     private string? Error;
 
@@ -41,19 +41,20 @@ else
         try
         {
             var res = await Api.GetAsync<List<ContactDto>>("/api/v1/contacts");
-
             if (res.IsSuccess)
             {
-                BuyerContacts = res.Value!;
+                BuyerContacts = res.Value!.ToList();
             }
             else
             {
                 Error = $"Error: {res.StatusCode}";
+                Snackbar.Add(Error, Severity.Error);
             }
         }
         catch (Exception ex)
         {
             Error = ex.Message;
+            Snackbar.Add(Error, Severity.Error);
         }
         finally
         {
