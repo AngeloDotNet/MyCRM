@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject ITokenProvider TokenProvider
+@inject ISnackbar Snackbar
+
+<MudThemeProvider>
+    <MudLayout>
+        <MudAppBar Color="Color.Primary" Elevation="1">
+            <MudText Typo="Typo.h6">MyCrm</MudText>
+            <MudSpacer />
+            <MudButton Variant="Variant.Text" OnClick="@GoToContacts">Contacts</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="@GoToLogin">Login</MudButton>
+        </MudAppBar>
+
+        <MudMainContent>
+            <MudContainer MaxWidth="MaxWidth.False">
+                @Body
+            </MudContainer>
+        </MudMainContent>
+    </MudLayout>
+</MudThemeProvider>
+
+@code {
+    void GoToContacts() => Nav.NavigateTo("/contacts");
+    void GoToLogin() => Nav.NavigateTo("/login");
+}
