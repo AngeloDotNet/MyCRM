@@ -1,16 +1,19 @@
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-WORKDIR /app
-EXPOSE 80
-
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["Api/Api.csproj", "Api/"]
-RUN dotnet restore "Api/Api.csproj"
-COPY . .
-WORKDIR /src/Api
-RUN dotnet publish "Api.csproj" -c Release -o /app/publish /p:GenerateAssemblyInfo=false
 
-FROM base AS final
+COPY . .
+RUN dotnet restore
+
+RUN dotnet build -c Release
+RUN dotnet publish BlazorClient -c Release -o /app/blazor
+RUN dotnet publish Api/Api.csproj -c Release -o /app/api
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
-COPY --from=build /app/publish .
+COPY --from=build /app/api ./
+
+RUN mkdir -p wwwroot
+COPY --from=build /app/blazor/wwwroot ./wwwroot
+
+EXPOSE 80
 ENTRYPOINT ["dotnet", "Api.dll"]

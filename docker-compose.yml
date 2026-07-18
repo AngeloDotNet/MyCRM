@@ -35,8 +35,8 @@ services:
 
   api:
     build:
-      context: ./Api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Api/Dockerfile
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=mssql,1433;Database=MyCrmDb;User Id=sa;Password=Your_strong_Admin!23;
